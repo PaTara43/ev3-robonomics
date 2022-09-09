@@ -43,7 +43,7 @@ class EV3:
         self.mqtt_client_id: str = "ev3_agent"
         self.mqtt_username: str = getenv("MQTT_USERNAME")
         self.mqtt_password: str = getenv("MQTT_PASSWORD")
-        self.mqtt_topics: list = [("offer", 0), ("response", 0), ("ev3_report", 0)]
+        self.mqtt_topics: list = [("offer", 0), ("response", 0), ("ev3_task", 0), ("ev3_report", 0)]
         self.mqtt_client: Client = self.connect_to_mqtt()
 
         self.report: tp.Optional[dict] = None
@@ -71,9 +71,7 @@ class EV3:
                 cid: str = ipfs_32_bytes_to_qm_hash(data[1]["hash"])
                 technics: tp.Dict[str, tp.Dict[int, int]] = ipfs_get_content(cid)
 
-                """
-                mqtt_publish_task
-                """
+                self.publish_mqtt(self.mqtt_topics[2][0], str(technics))
 
                 while True:
                     time.sleep(2)
@@ -177,33 +175,39 @@ class EV3:
             return
 
         try:
+
+            total_time = sum([route[i][2] for i in route])
             work_cost: int = self.calculate_work_cost(route)
-            logger.info(f"Offer price: {price}, work cost: {work_cost}.")
-            if work_cost >= price:
+            logger.info(f"Offer price: {price}, work cost: {work_cost}, time consumed: {total_time}")
+
+            if total_time > 360:
+                logger.info("Too time-consuming task.")
+                self.publish_mqtt(
+                    self.mqtt_topics[1][0],
+                    str(dict(addr=address, res=0, log=f"Too time-consuming task. Maximum is 5 minutes.")),
+                )
+            elif work_cost >= price:
                 logger.info("Too small price.")
                 self.publish_mqtt(
-                    self.mqtt_topics[2][0],
+                    self.mqtt_topics[1][0],
                     str(dict(addr=address, res=0, log=f"Too small price. Minimum price is {work_cost}.")),
                 )
+            elif self.status != 0:
+                logger.info("Robot busy.")
+                self.publish_mqtt(
+                    self.mqtt_topics[1][0],
+                    str(dict(addr=address, res=0, log="Robot busy.")),
+                )
             else:
-                if self.status != 0:
-                    logger.info("Robot busy")
-                    self.publish_mqtt(
-                        self.mqtt_topics[2][0],
-                        str(dict(addr=address, res=0, log="Robot busy.")),
-                    )
-                else:
-                    logger.info("Offer accepted.")
-                    self.status = 1
-                    self.accept_offer_procedure(address, route, price)
+                logger.info("Offer accepted.")
+                self.status = 1
+                self.accept_offer_procedure(address, route, price)
 
         except Exception:
             logger.error(f"Error while processing offer: {traceback.format_exc()}")
-            self.publish_mqtt(self.mqtt_topics[2][0], str(dict(addr=address, res=0, log="Failed to process query.")))
+            self.publish_mqtt(self.mqtt_topics[1][0], str(dict(addr=address, res=0, log="Failed to process query.")))
             self.status = 0
             self.pending_address = None
-
-        print("on_negotiation_query")
 
     def on_report(self, message: str):
         """
@@ -226,7 +230,7 @@ class EV3:
         logger.info(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
         if msg.topic == self.mqtt_topics[0][0]:
             self.on_offer(msg.payload.decode())
-        elif msg.topic == self.mqtt_topics[2][0]:
+        elif msg.topic == self.mqtt_topics[3][0]:
             self.on_report(msg.payload.decode())
 
     def subscribe_mqtt(self):
@@ -241,7 +245,7 @@ class EV3:
         logger.info("Started MQTT subscriber.")
 
     @staticmethod
-    def calculate_work_cost(route: dict) -> int:
+    def calculate_work_cost(route: list) -> int:
         """
         Calculate robot work cost in XRT decimals.
 
@@ -252,15 +256,14 @@ class EV3:
         """
 
         agg_work: int = 0
-        for wheels in route.keys():
-            for moves in route[wheels]:
-                agg_work += moves.key * moves.value
+        for stages in route:
+            agg_work += (stages[0]+stages[1])*stages[2]
 
         work_cost: int = (agg_work / 100 + 1) * 10**7  # 0.01 XRT for each 100 units of work
 
         return work_cost
 
-    def accept_offer_procedure(self, address: str, route: dict, price: int):
+    def accept_offer_procedure(self, address: str, route: list, price: int):
         """
         Send liability specs to the user for him to create a liability, set timeout. As soon as the offer is accepted,
             the agent is waiting for the liability from the user for 5 mins. After that, all the liabilities will be
@@ -279,26 +282,27 @@ class EV3:
             signature: str = liability_signer.sign_liability(technics, price)
 
             self.publish_mqtt(
-                self.mqtt_topics[2][0],
+                self.mqtt_topics[1][0],
                 str(
                     dict(
                         addr=address, res=1, technics=technics, ev3_addr=self.ev3_acc.get_address(), signature=signature
                     )
                 ),
             )
+            self.pending_address = address
+
+            time.sleep(5 * 60)
+            self.pending_address = None
+            if self.status == 1:
+                self.status = 0
 
         except Exception:
             logger.error(f"Failed to send liability specs: {traceback.format_exc()}")
             self.publish_mqtt(
-                self.mqtt_topics[2][0], str(dict(addr=address, res=0, log="Failed to send liability specs."))
+                self.mqtt_topics[1][0], str(dict(addr=address, res=0, log="Failed to send liability specs."))
             )
             self.status = 0
-            return
-
-        time.sleep(5 * 60)
-        self.pending_address = None
-        if self.status == 1:
-            self.status = 0
+            self.pending_address = None
 
 
 if __name__ == "__main__":
