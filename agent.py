@@ -257,7 +257,7 @@ class EV3:
 
         agg_work: int = 0
         for stages in route:
-            agg_work += (stages[0]+stages[1])*stages[2]
+            agg_work += (stages[0] + stages[1]) * stages[2]
 
         work_cost: int = (agg_work / 100 + 1) * 10**7  # 0.01 XRT for each 100 units of work
 
