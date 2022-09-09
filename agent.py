@@ -176,15 +176,34 @@ class EV3:
 
         try:
 
-            total_time = sum([route[i][2] for i in route])
+            valid_motor_value: bool = self.check_motor_values(route)
+            valid_time_value: bool = self.check_time_values(route)
             work_cost: int = self.calculate_work_cost(route)
-            logger.info(f"Offer price: {price}, work cost: {work_cost}, time consumed: {total_time}")
+            logger.info(f"Offer price: {price}, work cost: {work_cost}.")
 
-            if total_time > 360:
-                logger.info("Too time-consuming task.")
+            if not valid_motor_value:
+                logger.info("Invalid motor value in task. Motor values must be floats or ints [-100, 100].")
                 self.publish_mqtt(
                     self.mqtt_topics[1][0],
-                    str(dict(addr=address, res=0, log=f"Too time-consuming task. Maximum is 5 minutes.")),
+                    str(
+                        dict(
+                            addr=address,
+                            res=0,
+                            log=f"Invalid motor value in task. Motor values must be floats or ints [-100, 100].",
+                        )
+                    ),
+                )
+            elif not valid_time_value:
+                logger.info("Invalid time value. Time values must be positive and not exceed 5 minutes in total.")
+                self.publish_mqtt(
+                    self.mqtt_topics[1][0],
+                    str(
+                        dict(
+                            addr=address,
+                            res=0,
+                            log=f"Invalid time value. Time values must be positive and not exceed 5 minutes in total.",
+                        )
+                    ),
                 )
             elif work_cost >= price:
                 logger.info("Too small price.")
@@ -249,7 +268,7 @@ class EV3:
         """
         Calculate robot work cost in XRT decimals.
 
-        :param route: Route dictionary.
+        :param route: Route list.
 
         :return: Work cost in weiners.
 
@@ -262,6 +281,45 @@ class EV3:
         work_cost: int = (agg_work / 100 + 1) * 10**7  # 0.01 XRT for each 100 units of work
 
         return work_cost
+
+    @staticmethod
+    def check_motor_values(route: list) -> bool:
+        """
+        Check motor values to be valid.
+
+        :param route: Route list.
+
+        :return: True if valid, else false
+
+        """
+
+        motor_values = [sublist[:2] for sublist in route]
+        for i in motor_values:
+            for j in i:
+                if type(j) != int and type(j) != float:
+                    return False
+                if j > 100 or j < -100:
+                    return False
+        return True
+
+    @staticmethod
+    def check_time_values(route: list) -> bool:
+        """
+        Check time to be valid.
+
+        :param route: Route list.
+
+        :return: True if valid, else false
+
+        """
+
+        time_values = [sublist[2:] for sublist in route]
+        for i in time_values:
+            if type(i) != int and type(i) != float:
+                return False
+            if i < 0:
+                return False
+        return True
 
     def accept_offer_procedure(self, address: str, route: list, price: int):
         """
