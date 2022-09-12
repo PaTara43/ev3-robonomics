@@ -32,6 +32,9 @@ class EV3:
     """
 
     def __init__(self):
+
+        self.total_time: int = 0
+        self.report: tp.Optional[str] = None
         self.status: int = 0  # 0 - free, 1 - got an offer, waiting for liability, 2 - executing liability.
         self.pending_address: tp.Optional[str] = None
 
@@ -44,7 +47,6 @@ class EV3:
         self.mqtt_topics: list = [("offer", 1), ("response", 0), ("ev3_task", 0), ("ev3_report", 1)]
         self.mqtt_client: tp.Optional[Client] = None
 
-        self.report: tp.Optional[dict] = None
 
     def callback_new_liability(self, data):
         """
@@ -71,11 +73,15 @@ class EV3:
 
                 self.publish_mqtt(self.mqtt_topics[2][0], str(technics))
 
+                waiting_for: int = 0
                 while True:
-                    time.sleep(2)
+                    time.sleep(1)
                     if self.report:
                         logger.info("Got report from the EV3. Finalizing liability.")
                         break
+                    waiting_for += 1
+                    if waiting_for >= self.total_time + 60:
+                        self.report = f"Failed to execute task."
 
                 liability_report_tr_hash: str = self.report_liability(index=data[0], report_content=self.report)
                 self.report = None
@@ -85,9 +91,10 @@ class EV3:
                 logger.error(f"Failed to process new liability: {traceback.format_exc()}")
 
             finally:
+                self.pending_address = None
                 self.status = 0
 
-    def report_liability(self, index: int, report_content: dict) -> str:
+    def report_liability(self, index: int, report_content: str) -> str:
         """
         Report liability with a EV3 sensor logs.
 
@@ -296,8 +303,7 @@ class EV3:
                     return False
         return True
 
-    @staticmethod
-    def check_time_values(route: list) -> bool:
+    def check_time_values(self, route: list) -> bool:
         """
         Check time to be valid.
 
@@ -308,15 +314,15 @@ class EV3:
         """
 
         time_values = [sublist[2:] for sublist in route]
-        total_time: int = 0
+        self.total_time: int = 0
         for i in time_values:
             if type(i[0]) != int and type(i[0]) != float:
                 return False
             elif i[0] < 0:
                 return False
             else:
-                total_time += i[0]
-        if total_time > 5*60:
+                self.total_time += i[0]
+        if self.total_time > 5*60:
             return False
         return True
 
@@ -369,10 +375,13 @@ class EV3:
 
         """
 
-        time.sleep(5 * 60)
+        time.sleep(60)
         self.pending_address = None
         if self.status == 1:
             self.status = 0
+
+    def robot_timeout(self):
+        pass
 
     def run(self):
         """
