@@ -39,10 +39,8 @@ class EV3:
         self.ev3_acc: Account = Account(seed=self.seed)
 
         self.mqtt_broker: str = "127.0.0.1"
-        self.mqtt_port: int = 1883
+        self.mqtt_port: int = 1893
         self.mqtt_client_id: str = "ev3_agent"
-        self.mqtt_username: str = getenv("MQTT_USERNAME")
-        self.mqtt_password: str = getenv("MQTT_PASSWORD")
         self.mqtt_topics: list = [("offer", 0), ("response", 0), ("ev3_task", 0), ("ev3_report", 0)]
         self.mqtt_client: Client = self.connect_to_mqtt()
 
@@ -136,7 +134,6 @@ class EV3:
 
         # Set Connecting Client ID
         client: Client = Client(self.mqtt_client_id)
-        client.username_pw_set(self.mqtt_username, self.mqtt_password)
         client.on_connect = on_connect
         client.connect(self.mqtt_broker, self.mqtt_port)
         return client
@@ -343,7 +340,12 @@ class EV3:
                 self.mqtt_topics[1][0],
                 str(
                     dict(
-                        addr=address, res=1, technics=technics, ev3_addr=self.ev3_acc.get_address(), signature=signature
+                        addr=address,
+                        res=1,
+                        technics=technics,
+                        price=price,
+                        ev3_addr=self.ev3_acc.get_address(),
+                        signature=signature,
                     )
                 ),
             )
