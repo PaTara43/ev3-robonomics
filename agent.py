@@ -225,28 +225,7 @@ class EV3:
                         else:
                             logger.info("Offer accepted.")
                             self.status = 1
-                            technics: str = ipfs_upload_content(self.seed, route)
-                            liability_signer: Liability = Liability(self.ev3_acc)
-                            signature: str = liability_signer.sign_liability(technics, price)
-
-                            self.publish_mqtt(
-                                self.mqtt_topics[1][0],
-                                str(dict(
-                                    addr=address,
-                                    res=1,
-                                    technics=technics,
-                                    price=price,
-                                    ev3_addr=self.ev3_acc.get_address(),
-                                    signature=signature,
-                                )),
-                            )
-
-                            self.pending_address = address
-
-                            # time.sleep(5 * 60)
-                            # self.pending_address = None
-                            # if self.status == 1:
-                            #     self.status = 0
+                            self.accept_offer_procedure(address, route, price)
 
         except Exception:
             logger.error(f"Error while processing offer: {traceback.format_exc()}")
@@ -262,7 +241,7 @@ class EV3:
 
         """
 
-        self.report: dict = literal_eval(message)
+        self.report: str = message
 
     def on_message(self, client, userdata, msg):
         """
@@ -293,7 +272,7 @@ class EV3:
         for stages in route:
             agg_work += (stages[0] + stages[1]) * stages[2]
 
-        work_cost: int = (agg_work / 100 + 1) * 10**7  # 0.01 XRT for each 100 units of work
+        work_cost: int = (agg_work / 1000 + 1) * 10**7  # 0.001 XRT for each 100 units of work
 
         return work_cost
 
@@ -340,6 +319,60 @@ class EV3:
         if total_time > 5*60:
             return False
         return True
+
+    def accept_offer_procedure(self, address: str, route: list, price: int):
+        """
+        Send liability specs to the user for him to create a liability, set timeout. As soon as the offer is accepted,
+            the agent is waiting for the liability from the user for 5 mins. After that, all the liabilities will be
+            ignored and robot status will switch to 0 - Free.
+
+        :param address: User address.
+        :param route: Ordered route.
+        :param price: Offered price.
+
+
+        """
+
+        try:
+            technics: str = ipfs_upload_content(self.seed, route)
+            liability_signer: Liability = Liability(self.ev3_acc)
+            signature: str = liability_signer.sign_liability(technics, price)
+
+            response_dict = str(
+                    dict(
+                        addr=address,
+                        res=1,
+                        technics=technics,
+                        price=price,
+                        ev3_addr=self.ev3_acc.get_address(),
+                        signature=signature,
+                    )
+                )
+            self.publish_mqtt(self.mqtt_topics[1][0], response_dict,)
+            self.pending_address = address
+
+            liability_timeout: Thread = Thread(target=self.liability_timeout)
+            liability_timeout.start()
+
+
+        except Exception:
+            logger.error(f"Failed to send liability specs: {traceback.format_exc()}")
+            self.publish_mqtt(
+                self.mqtt_topics[1][0], str(dict(addr=address, res=0, log="Failed to send liability specs.")),
+            )
+            self.status = 0
+            self.pending_address = None
+
+    def liability_timeout(self):
+        """
+        Sleep for 1 mins, waiting for the liability to come from address, otherwise, then come free again.
+
+        """
+
+        time.sleep(5 * 60)
+        self.pending_address = None
+        if self.status == 1:
+            self.status = 0
 
     def run(self):
         """
