@@ -364,14 +364,20 @@ class EV3:
             self.status = 0
             self.pending_address = None
 
+    def run(self):
+        """
+        Run subscribers in parallel threads.
+
+        """
+        mqtt_subscriber_thread = Thread(target=self.subscribe_mqtt)
+        mqtt_subscriber_thread.start()
+
+        liability_subscriber_thread = Thread(target=self.subscribe_new_liability)
+        liability_subscriber_thread.start()
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     ev3: EV3 = EV3()
-
-    mqtt_subscriber_thread = Thread(target=EV3.subscribe_mqtt)
-    mqtt_subscriber_thread.start()
-
-    liability_subscriber_thread = Thread(target=EV3.subscribe_new_liability)
-    liability_subscriber_thread.start()
+    ev3.run()
