@@ -36,7 +36,7 @@ class EV3:
         self.pending_address: tp.Optional[str] = None
 
         self.seed: str = getenv("EV3_SEED")
-        self.ev3_acc: Account = Account(seed=self.seed, remote_ws="ws://127.0.0.1:9944")
+        self.ev3_acc: Account = Account(seed=self.seed)
 
         self.mqtt_broker: str = "127.0.0.1"
         self.mqtt_port: int = 1893
